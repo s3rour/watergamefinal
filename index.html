@@ -1,20 +1,59 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Water Quest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600&family=Nunito:wght@400;700;800&display=swap" rel="stylesheet">
   <link href="style.css" rel="stylesheet" type="text/css" />
 </head>
 <body>
   <div class="container">
-    <h1>Water Quest</h1>
-    <p class="game-instructions">Reach 1000 score to beat the game!</p>
+    <div class="brand-row">
+      <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M50 5 C50 5 20 45 20 68 A30 30 0 0 0 80 68 C80 45 50 5 50 5 Z" fill="#2E9DF7"/>
+        <path d="M50 20 C50 20 32 46 32 62 A18 18 0 0 0 68 62 C68 46 50 20 50 20 Z" fill="#8BD1CB" opacity="0.6"/>
+      </svg>
+      <h1>Water Quest</h1>
+    </div>
+    <p class="game-instructions">Dodge the rocks and deliver 1,000 points of clean water!</p>
+
     <div class="stats">
       <p>Score: <span id="score">0</span></p>
     </div>
-    <div id="achievements" class="achievement"></div>
-    <div class="game-grid"></div>
+
+    <div class="tank" aria-hidden="true">
+      <div class="tank-label"><span>Score</span><span>Goal: 1000</span></div>
+      <div class="tank-outer">
+        <div class="tank-fill" id="tank-fill"></div>
+      </div>
+    </div>
+
+    <div id="achievements" class="achievement" role="status" aria-live="polite"></div>
+
+    <div class="game-grid">
+      <div class="overlay" id="start-overlay">
+        <h2>Ready to deliver water?</h2>
+        <p>Use ← → or A / D to move. On mobile, use the buttons below or swipe.</p>
+      </div>
+      <div class="overlay hidden" id="game-over-overlay">
+        <h2>Game over</h2>
+        <p>Final score: <span id="final-score">0</span></p>
+        <button id="retry-game">Try again</button>
+      </div>
+      <div class="overlay hidden win" id="win-overlay">
+        <h2>You did it!</h2>
+        <p>1,000 points of clean water delivered.</p>
+        <button id="play-again">Play again</button>
+      </div>
+    </div>
+
+    <div class="touch-controls">
+      <button class="touch-btn" id="move-left" aria-label="Move left">←</button>
+      <button class="touch-btn" id="move-right" aria-label="Move right">→</button>
+    </div>
+
     <button id="start-game">Start Game</button>
   </div>
   <script src="script.js"></script>

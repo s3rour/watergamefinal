@@ -1,29 +1,34 @@
 // Game configuration and state variables
 const ROWS = 6;                  // Number of grid rows
 const COLS = 3;                  // Number of grid columns (matches CSS)
+const WIN_SCORE = 1000;          // Score needed to beat the game
 let gameActive = false;
 let playerCol = Math.floor(COLS / 2); // Player's column (always on bottom row)
-let obstacles = [];              // Array of {row, col} falling obstacles
+let obstacles = [];              // Array of {id, element, row, col, fading}
 let spawnInterval = null;
-let moveInterval = null;
+let animationRafId = null;
 let score = 0;
-let difficultyInterval = null;
-let checkpointInterval = null;
 let checkpointTimeout = null;
+let obstacleIdCounter = 0;
 
-// Difficulty parameters (ms)
-let spawnMs = 1000;
-let moveMs = 500;
-const minSpawnMs = 200;
-const minMoveMs = 120;
-const difficultyStepMs = 15000; // every 15s increase difficulty
-let elapsedSeconds = 0;
-let checkpoints = 0;
+// Difficulty parameters (ms) — constant for the whole game, no ramp.
+const startSpawnMs = 1300;
+const startMoveMs = 520;
+let spawnMs = startSpawnMs;
+let moveMs = startMoveMs;
 const checkpointSeconds = 100; // configurable checkpoint interval in seconds
 
+// Rows-from-top that count as a hit for the row-based collision check.
+const collisionRow = ROWS - 2;
+
+const MIDDLE_COL = Math.floor(COLS / 2);
+
+// --- DOM / rendering helpers ---
 function createGrid() {
   const grid = document.querySelector('.game-grid');
-  grid.innerHTML = '';
+  if (!grid) return;
+  grid.querySelectorAll('.grid-cell, #player-element').forEach(el => el.remove());
+
   const total = ROWS * COLS;
   for (let i = 0; i < total; i++) {
     const cell = document.createElement('div');
@@ -31,136 +36,279 @@ function createGrid() {
     cell.dataset.index = i;
     grid.appendChild(cell);
   }
+
+  const playerElement = document.createElement('div');
+  playerElement.id = 'player-element';
+  playerElement.className = 'player-animated';
+  grid.appendChild(playerElement);
+}
+
+function getGridDimensions() {
+  const grid = document.querySelector('.game-grid');
+  const gridRect = grid.getBoundingClientRect();
+  const cellWidth = gridRect.width / COLS;
+  const cellHeight = gridRect.height / ROWS;
+  return { cellWidth, cellHeight, gridWidth: gridRect.width, gridHeight: gridRect.height };
+}
+
+function positionObstacleElement(element, col, row) {
+  const { cellWidth, cellHeight, gridWidth, gridHeight } = getGridDimensions();
+  const left = (col * cellWidth + cellWidth / 2) / gridWidth * 100;
+  const top = (row * cellHeight + cellHeight / 2) / gridHeight * 100;
+  element.style.left = left + '%';
+  element.style.top = top + '%';
+}
+
+function positionPlayerElement(col) {
+  const playerElement = document.getElementById('player-element');
+  if (!playerElement) return;
+  const { cellWidth, cellHeight, gridWidth, gridHeight } = getGridDimensions();
+  const left = (col * cellWidth + cellWidth / 2) / gridWidth * 100;
+  const top = ((ROWS - 1) * cellHeight) / gridHeight * 100;
+  playerElement.style.left = left + '%';
+  playerElement.style.top = top + '%';
+}
+
+function createObstacle(col) {
+  const obstacle = document.createElement('div');
+  obstacle.className = 'obstacle-animated';
+  const grid = document.querySelector('.game-grid');
+  grid.appendChild(obstacle);
+
+  const id = obstacleIdCounter++;
+
+  const { cellHeight, gridHeight, gridWidth } = getGridDimensions();
+  const gridRect = document.querySelector('.game-grid').getBoundingClientRect();
+
+  const startCenterY = gridRect.top + (-0.5) * cellHeight;
+  const endCenterY = gridRect.top + (ROWS + 0.5) * cellHeight;
+  const distancePx = endCenterY - startCenterY;
+
+  const speedPxPerMs = cellHeight / moveMs; 
+  const durationMs = Math.max(100, Math.round(distancePx / speedPxPerMs));
+
+  positionObstacleElement(obstacle, col, -1);
+  obstacle.style.transitionDuration = `${durationMs}ms, 150ms`;
+  void obstacle.offsetHeight;
+  
+  requestAnimationFrame(() => {
+    const left = (col * (gridWidth / COLS) + (gridWidth / COLS) / 2) / gridWidth * 100;
+    const top = ((ROWS + 0.5) * cellHeight) / gridHeight * 100;
+    obstacle.style.left = left + '%';
+    obstacle.style.top = top + '%';
+  });
+
+  return { id, element: obstacle, row: -1, col, fading: false };
+}
+
+// Animation loop: handles real-time position updates, scoring, and collisions
+function animationLoop() {
+  if (!gameActive) return;
+  const grid = document.querySelector('.game-grid');
+  if (!grid) return;
+  const gridRect = grid.getBoundingClientRect();
+  const { cellHeight, gridHeight } = getGridDimensions();
+
+  const playerEl = document.getElementById('player-element');
+  const playerRect = playerEl && playerEl.getBoundingClientRect();
+
+  for (const o of obstacles) {
+    if (o.fading) continue;
+    const el = o.element;
+    const rect = el.getBoundingClientRect();
+    const centerY = rect.top + rect.height / 2;
+    const relativeY = centerY - gridRect.top;
+    
+    o.row = Math.floor(relativeY / cellHeight);
+
+    // 1. Grid/Row Collision check
+    if (o.col === playerCol && (o.row === collisionRow || o.row === collisionRow + 1)) {
+      endGame('You hit a rock! Game over.');
+      return;
+    }
+
+    // 2. Bounding-box overlap fallback check
+    if (playerRect && rectsOverlap(playerRect, rect)) {
+      endGame('You hit a rock! Game over.');
+      return;
+    }
+
+    // 3. Reliable Scoring & Fade-out point when rock leaves the screen
+    if (o.row >= ROWS && !o.fading) {
+      o.fading = true;
+      el.classList.add('fade-out');
+      setTimeout(() => { el.remove(); }, 500);
+      addScore(10);
+    }
+  }
+
+  obstacles = obstacles.filter(o => !o.fading);
+  positionPlayerElement(playerCol);
+  animationRafId = requestAnimationFrame(animationLoop);
 }
 
 function renderGrid() {
-  const cells = document.querySelectorAll('.grid-cell');
-  cells.forEach(cell => (cell.innerHTML = ''));
+  positionPlayerElement(playerCol);
+}
 
-  // Draw obstacles
-  obstacles.forEach(({ row, col }) => {
-    if (row < 0 || row >= ROWS) return;
-    const idx = row * COLS + col;
-    const cell = cells[idx];
-    if (!cell) return;
-    cell.innerHTML = `<div class="obstacle"></div>`;
-  });
+// --- Scoring ---
+function addScore(amount) {
+  score += amount;
+  const scoreEl = document.getElementById('score');
+  if (scoreEl) scoreEl.textContent = score;
+  updateTank();
+  if (score >= WIN_SCORE) winGame();
+}
 
-  // Draw player on the bottom row
-  const playerRow = ROWS - 1;
-  const playerIdx = playerRow * COLS + playerCol;
-  const playerCell = cells[playerIdx];
-  if (playerCell) {
-    // If obstacle is also here, player is rendered on top
-    playerCell.innerHTML = playerCell.innerHTML + `<div class="player"></div>`;
+function updateTank() {
+  const fill = document.getElementById('tank-fill');
+  if (!fill) return;
+  const pct = Math.min(100, (score / WIN_SCORE) * 100);
+  fill.style.width = pct + '%';
+}
+
+function rectsOverlap(a, b) {
+  return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+}
+
+function movePlayer(direction) {
+  if (!gameActive) return;
+  if (direction === 'left' && playerCol > 0) playerCol -= 1;
+  if (direction === 'right' && playerCol < COLS - 1) playerCol += 1;
+  renderGrid();
+}
+
+const minSpawnRowGap = 2;
+
+function columnIsClear(col) {
+  return !obstacles.some(o => !o.fading && o.col === col && o.row < minSpawnRowGap);
+}
+
+// FIXED: Perfectly balanced spawning logic.
+// Instead of penalizing adjacent columns, we check if there's any active rock mid-screen (rows 1 to 3).
+// If there is, we force the new rock to spawn in that EXACT same column.
+// Why? This stacks rocks sequentially in one lane, leaving the other two lanes 100% wide open for escaping corners!
+function wouldTrapPlayer(col) {
+  const midScreenRock = obstacles.find(o => !o.fading && o.row >= 1 && o.row <= 3);
+  
+  if (midScreenRock) {
+    return col !== midScreenRock.col;
   }
+  
+  return false;
 }
 
 function spawnObstacle() {
   if (!gameActive) return;
-  const col = Math.floor(Math.random() * COLS);
-  obstacles.push({ row: 0, col });
-  renderGrid();
+  const availableCols = [];
+  for (let c = 0; c < COLS; c++) {
+    if (columnIsClear(c) && !wouldTrapPlayer(c)) availableCols.push(c);
+  }
+  if (availableCols.length === 0) return; 
+  const col = availableCols[Math.floor(Math.random() * availableCols.length)];
+  const newObstacle = createObstacle(col);
+  obstacles.push(newObstacle);
 }
 
-function moveObstaclesDown() {
-  if (!gameActive) return;
-  obstacles = obstacles.map(o => ({ row: o.row + 1, col: o.col }));
-  // Check for collisions: any obstacle that moved into the player's cell
-  for (const o of obstacles) {
-    if (o.row === ROWS - 1 && o.col === playerCol) {
-      const el = document.getElementById('achievements');
-      if (el) el.textContent = 'You hit an obstacle! Game Over.';
-      renderGrid();
-      endGame();
-      // leave the final state displayed
-      return;
-    }
-  }
-
-  // Remove any obstacles that moved past the bottom row
-  obstacles = obstacles.filter(o => o.row < ROWS);
-  score += 1;
-  const scoreEl = document.getElementById('score');
-  if (scoreEl) scoreEl.textContent = score;
-  renderGrid();
+// --- UI / controls / lifecycle ---
+function setAchievement(text) {
+  const el = document.getElementById('achievements');
+  if (el) el.textContent = text;
 }
 
-function handleKey(e) {
-  if (!gameActive) return;
-  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-    if (playerCol > 0) playerCol -= 1;
-    renderGrid();
-  } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-    if (playerCol < COLS - 1) playerCol += 1;
-    renderGrid();
-  }
+function clearAllObstacles() {
+  obstacles.forEach(o => o.element.remove());
+  obstacles = [];
+}
+
+function hideOverlays() {
+  ['start-overlay', 'game-over-overlay', 'win-overlay'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('hidden');
+  });
 }
 
 function startGame() {
-  if (gameActive) return;
-  const el = document.getElementById('achievements');
-  if (el) el.textContent = 'Game started!';
-  gameActive = true;
-  obstacles = [];
+  clearInterval(spawnInterval);
+  clearTimeout(checkpointTimeout);
+
+  hideOverlays();
+  clearAllObstacles();
+  obstacleIdCounter = 0;
   playerCol = Math.floor(COLS / 2);
+  score = 0;
+  spawnMs = startSpawnMs;
+  moveMs = startMoveMs;
+
   createGrid();
   renderGrid();
-  score = 0;
   document.getElementById('score').textContent = score;
-  // Spawn/move intervals based on difficulty variables
+  updateTank();
+  setAchievement('Game started! Dodge the rocks.');
+
+  gameActive = true;
   spawnInterval = setInterval(spawnObstacle, spawnMs);
-  moveInterval = setInterval(moveObstaclesDown, moveMs);
+  animationRafId = requestAnimationFrame(animationLoop);
 
-  // Difficulty increases over time
-  difficultyInterval = setInterval(() => {
-    // increase elapsed time
-    elapsedSeconds += difficultyStepMs / 1000;
-    // tighten spawn and move intervals
-    spawnMs = Math.max(minSpawnMs, spawnMs - 50);
-    moveMs = Math.max(minMoveMs, moveMs - 25);
-    // reset intervals with new speeds
-    clearInterval(spawnInterval);
-    spawnInterval = setInterval(spawnObstacle, spawnMs);
-    clearInterval(moveInterval);
-    moveInterval = setInterval(moveObstaclesDown, moveMs);
-    // optionally show minor feedback
-    const el = document.getElementById('achievements');
-    if (el) {
-      el.textContent = `Difficulty increased to spawn ${spawnMs}ms, move ${moveMs}ms`;
-      setTimeout(() => { el.textContent = ''; }, 2000);
-    }
-  }, difficultyStepMs);
-
-  // Schedule first checkpoint using timeout (more reliable and configurable)
   function scheduleCheckpoint() {
     clearTimeout(checkpointTimeout);
     checkpointTimeout = setTimeout(() => {
-      checkpoints += 1;
-      const el = document.getElementById('achievements');
-      const msg = `Checkpoint reached! (${checkpoints})`;
-      console.log(msg);
-      if (el) {
-        el.textContent = msg;
-        setTimeout(() => { el.textContent = ''; }, 4000);
-      }
-      // schedule next
+      setAchievement('Checkpoint reached!');
+      setTimeout(() => { if (gameActive) setAchievement(''); }, 4000);
       scheduleCheckpoint();
     }, checkpointSeconds * 1000);
   }
   scheduleCheckpoint();
 }
 
-function endGame() {
+function stopTimers() {
   gameActive = false;
   clearInterval(spawnInterval);
-  clearInterval(moveInterval);
-  clearInterval(difficultyInterval);
-  clearInterval(checkpointInterval);
   clearTimeout(checkpointTimeout);
-  document.getElementById('score').textContent = score;
+  if (animationRafId) cancelAnimationFrame(animationRafId);
+}
+
+function endGame(message) {
+  stopTimers();
+  setAchievement(message || 'Game over.');
+  const overlay = document.getElementById('game-over-overlay');
+  const finalScoreEl = document.getElementById('final-score');
+  if (finalScoreEl) finalScoreEl.textContent = score;
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function winGame() {
+  stopTimers();
+  setAchievement('You reached the goal! Clean water delivered.');
+  const overlay = document.getElementById('win-overlay');
+  if (overlay) overlay.classList.remove('hidden');
+}
+
+function setupTouchControls() {
+  const controls = document.querySelector('.touch-controls');
+  if (!controls) return;
+  if ('ontouchstart' in window || navigator.maxTouchPoints > 0) controls.classList.add('visible');
+  document.getElementById('move-left')?.addEventListener('click', () => movePlayer('left'));
+  document.getElementById('move-right')?.addEventListener('click', () => movePlayer('right'));
+  const grid = document.querySelector('.game-grid');
+  let touchStartX = null;
+  grid?.addEventListener('touchstart', (e) => { touchStartX = e.changedTouches[0].clientX; }, { passive: true });
+  grid?.addEventListener('touchend', (e) => {
+    if (touchStartX === null) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    if (Math.abs(dx) > 30) movePlayer(dx > 0 ? 'right' : 'left');
+    touchStartX = null;
+  }, { passive: true });
 }
 
 // Controls
-window.addEventListener('keydown', handleKey);
-document.getElementById('start-game').addEventListener('click', startGame);
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') movePlayer('left');
+  else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') movePlayer('right');
+  else if (e.key === 'Enter' && !gameActive) startGame();
+});
+document.getElementById('start-game')?.addEventListener('click', startGame);
+document.getElementById('retry-game')?.addEventListener('click', startGame);
+document.getElementById('play-again')?.addEventListener('click', startGame);
+window.addEventListener('resize', renderGrid);
+setupTouchControls();
