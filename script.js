@@ -263,7 +263,7 @@ function showMotivationalMessage() {
         setAchievement('');
       }
     }
-  }, 4000);
+  }, 10000);
 }
 
 function scheduleMotivationalMessages() {
