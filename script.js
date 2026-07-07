@@ -6,9 +6,12 @@ let gameActive = false;
 let playerCol = Math.floor(COLS / 2); // Player's column (always on bottom row)
 let obstacles = [];              // Array of {id, element, row, col, fading}
 let spawnInterval = null;
+let gameMode = 'easy';
 let animationRafId = null;
 let score = 0;
 let checkpointTimeout = null;
+let motivationInterval = null;
+let motivationTimeout = null;
 let obstacleIdCounter = 0;
 
 // Difficulty parameters (ms) — constant for the whole game, no ramp.
@@ -204,16 +207,70 @@ function spawnObstacle() {
   for (let c = 0; c < COLS; c++) {
     if (columnIsClear(c) && !wouldTrapPlayer(c)) availableCols.push(c);
   }
-  if (availableCols.length === 0) return; 
-  const col = availableCols[Math.floor(Math.random() * availableCols.length)];
-  const newObstacle = createObstacle(col);
-  obstacles.push(newObstacle);
+  if (availableCols.length === 0) return;
+
+  const firstCol = availableCols[Math.floor(Math.random() * availableCols.length)];
+  const colsToSpawn = [firstCol];
+
+  if (gameMode === 'hard') {
+    const secondCol = availableCols[Math.floor(Math.random() * availableCols.length)];
+    if (secondCol !== firstCol) colsToSpawn.push(secondCol);
+  }
+
+  colsToSpawn.forEach((col) => {
+    obstacles.push(createObstacle(col));
+  });
+}
+
+function setGameMode(mode) {
+  gameMode = mode;
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    const isActive = btn.dataset.mode === mode;
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-pressed', String(isActive));
+  });
+}
+
+function setupModeSelector() {
+  document.querySelectorAll('.mode-btn').forEach((btn) => {
+    btn.addEventListener('click', () => setGameMode(btn.dataset.mode || 'easy'));
+  });
+  setGameMode(gameMode);
 }
 
 // --- UI / controls / lifecycle ---
+const motivationalMessages = [
+  'charity: water helps bring clean water to communities around the world.',
+  'Every drop matters — safe water changes lives every day.',
+  'Local partners make lasting water projects possible.',
+  'Clean water means healthier homes, schools, and futures.'
+];
+
 function setAchievement(text) {
   const el = document.getElementById('achievements');
   if (el) el.textContent = text;
+}
+
+function showMotivationalMessage() {
+  if (!gameActive) return;
+  const message = motivationalMessages[Math.floor(Math.random() * motivationalMessages.length)];
+  setAchievement(message);
+  clearTimeout(motivationTimeout);
+  motivationTimeout = setTimeout(() => {
+    if (gameActive) {
+      const el = document.getElementById('achievements');
+      if (el && el.textContent === message) {
+        setAchievement('');
+      }
+    }
+  }, 4000);
+}
+
+function scheduleMotivationalMessages() {
+  clearInterval(motivationInterval);
+  motivationInterval = setInterval(() => {
+    showMotivationalMessage();
+  }, 10000);
 }
 
 function clearAllObstacles() {
@@ -244,11 +301,12 @@ function startGame() {
   renderGrid();
   document.getElementById('score').textContent = score;
   updateTank();
-  setAchievement('Game started! Dodge the rocks.');
+  setAchievement(gameMode === 'hard' ? 'Hard mode: dodge the rocks.' : 'Easy mode: dodge the rocks.');
 
   gameActive = true;
   spawnInterval = setInterval(spawnObstacle, spawnMs);
   animationRafId = requestAnimationFrame(animationLoop);
+  scheduleMotivationalMessages();
 
   function scheduleCheckpoint() {
     clearTimeout(checkpointTimeout);
@@ -265,6 +323,8 @@ function stopTimers() {
   gameActive = false;
   clearInterval(spawnInterval);
   clearTimeout(checkpointTimeout);
+  clearInterval(motivationInterval);
+  clearTimeout(motivationTimeout);
   if (animationRafId) cancelAnimationFrame(animationRafId);
 }
 
@@ -311,4 +371,5 @@ document.getElementById('start-game')?.addEventListener('click', startGame);
 document.getElementById('retry-game')?.addEventListener('click', startGame);
 document.getElementById('play-again')?.addEventListener('click', startGame);
 window.addEventListener('resize', renderGrid);
+setupModeSelector();
 setupTouchControls();

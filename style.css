@@ -168,6 +168,43 @@ h1 {
   margin-bottom: 10px;
 }
 
+.mode-selector {
+  margin-top: 16px;
+}
+
+.mode-label {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.mode-options {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.mode-btn {
+  margin: 0;
+  padding: 10px 18px;
+  box-shadow: none;
+  background-color: rgba(255,255,255,0.9);
+  color: var(--ink);
+  border: 2px solid rgba(46, 157, 247, 0.2);
+}
+
+.mode-btn.active {
+  background-color: var(--blue);
+  color: white;
+  border-color: var(--blue);
+}
+
+.mode-btn:hover {
+  transform: translateY(-1px);
+}
+
 .game-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
